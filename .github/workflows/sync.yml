@@ -1,0 +1,62 @@
+# 文件名: .github/workflows/sync-upstream.yml
+
+name: Sync Upstream
+
+on:
+  # 1. 定时触发：使用 cron 语法，这里表示每小时执行一次。
+  # 你可以根据需要调整，例如一天一次是 '0 0 * * *'
+  schedule:
+    - cron: '0 0 * * *'
+  
+  # 2. 手动触发：允许你在 Actions 页面手动点击运行此工作流
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # 我们需要获取所有历史记录以便进行 rebase 或 merge
+          fetch-depth: 0
+          # 使用一个有写权限的 Personal Access Token (PAT)
+          # 如果只是合并公开仓库，用默认的 GITHUB_TOKEN 也可以，但使用 PAT 更可靠
+          token: ${{ secrets.PAT_FOR_SYNC || secrets.GITHUB_TOKEN }}
+
+      - name: Set up Git
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+
+      - name: Add Upstream Remote
+        run: |
+          # 替换 [UPSTREAM_REPO_URL] 为原始仓库的 HTTPS URL
+          # 例如：https://github.com/openai/gpt-3.git
+          git remote add upstream https://github.com/OpenListTeam/OpenList-APIPages.git # <-- 请修改这里！
+
+      - name: Fetch Upstream and Sync
+        run: |
+          # 拉取上游所有分支和标签
+          git fetch upstream
+
+          # 获取所有分支名称
+          for branch in $(git branch -r | grep 'upstream/' | grep -v 'HEAD' | sed 's/upstream\///'); do
+            echo "Syncing branch $branch..."
+            # 切换到本地对应分支，如果不存在则创建
+            git checkout $branch || git checkout -b $branch origin/$branch
+            
+            # 使用 rebase 保持历史干净 (推荐)
+            # 如果 rebase 失败（例如有冲突），脚本会出错并停止
+            git rebase upstream/$branch
+            
+            # (或者，如果你更喜欢 merge)
+            # git merge upstream/$branch
+            
+            # 推送到你自己的 fork
+            git push origin $branch
+          done
+
+          # 同步所有标签
+          echo "Syncing all tags..."
+          git push origin --tags
